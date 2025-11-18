@@ -1,8 +1,7 @@
 ﻿using PromptProvider.Models;
-using PromptProvider.Options;
 using PromptProvider.Interfaces;
-using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
+using PromptProvider.Options;
 
 namespace PromptProvider.Services;
 
@@ -10,18 +9,18 @@ public class PromptService : IPromptService
 {
     private readonly ILogger<PromptService> _logger;
     private readonly ILangfuseService _langfuseService;
-    private readonly IOptions<PromptsOptions> _promptsOptions;
-    private readonly IOptions<LangfuseOptions> _langfuseOptions;
+    private readonly IDefaultPromptsProvider _defaultPromptsProvider;
+    private readonly Microsoft.Extensions.Options.IOptions<LangfuseOptions> _langfuseOptions;
 
     public PromptService(
         ILogger<PromptService> logger,
         ILangfuseService langfuseService,
-        IOptions<PromptsOptions> promptsOptions,
-        IOptions<LangfuseOptions> langfuseOptions)
+        IDefaultPromptsProvider defaultPromptsProvider,
+        Microsoft.Extensions.Options.IOptions<LangfuseOptions> langfuseOptions)
     {
         _logger = logger;
         _langfuseService = langfuseService;
-        _promptsOptions = promptsOptions;
+        _defaultPromptsProvider = defaultPromptsProvider;
         _langfuseOptions = langfuseOptions;
     }
 
@@ -236,7 +235,7 @@ public class PromptService : IPromptService
 
     private PromptResponse? GetPromptFromDefaults(string promptKey)
     {
-        var defaults = _promptsOptions.Value.Defaults;
+        var defaults = _defaultPromptsProvider.GetDefaults();
         if (defaults == null || !defaults.TryGetValue(promptKey, out var content))
         {
             _logger.LogWarning("Prompt '{PromptKey}' not found in local defaults either", promptKey);
