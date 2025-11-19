@@ -47,6 +47,7 @@ public class LangfuseService : ILangfuseService
         var authValue = Convert.ToBase64String(
             Encoding.UTF8.GetBytes($"{_options.PublicKey}:{_options.SecretKey}"));
         _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", authValue);
+        _httpClient.BaseAddress = new Uri(_options.BaseUrl);
     }
 
     private void ThrowIfNotConfigured()
