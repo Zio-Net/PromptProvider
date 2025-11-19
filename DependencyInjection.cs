@@ -15,7 +15,14 @@ public static class DependencyInjection
         if (configureLangfuse is not null) services.Configure(configureLangfuse);
         if (configurePrompts is not null) services.Configure(configurePrompts);
 
-        services.AddHttpClient<ILangfuseService, LangfuseService>();
+        services.AddHttpClient<ILangfuseService, LangfuseService>((serviceProvider, client) =>
+        {
+            var options = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<LangfuseOptions>>().Value;
+            if (options.IsConfigured() && !string.IsNullOrWhiteSpace(options.BaseUrl))
+            {
+                client.BaseAddress = new Uri(options.BaseUrl);
+            }
+        });
         services.AddScoped<IPromptService, PromptService>();
 
         // Register default prompts provider (users may replace with custom implementation)
