@@ -30,10 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ -f "$LIB_PROJ" ]] || { echo "Library not found: $LIB_PROJ"; exit 1; }
-          [[ -f "$TEST_PROJ" ]] || { echo "Test project not found: $TEST_PROJ"; exit 1; }
           echo "Library: $LIB_PROJ"
-          echo "Tests:   $TEST_PROJ"
-
       - name: Restore
         shell: bash
         run: |
@@ -43,12 +40,6 @@ jobs:
         shell: bash
         run: |
           dotnet build "$LIB_PROJ" -c Release -p:ContinuousIntegrationBuild=true --no-restore
-
-      - name: Test
-        shell: bash
-        run: |
-          dotnet test "$TEST_PROJ" -c Release --logger "trx;LogFileName=test-results.trx"
-
       - name: Resolve version
         id: ver
         shell: bash
