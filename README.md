@@ -1,6 +1,6 @@
 # PromptProvider
 
-PromptProvider — a library for managing prompts with Langfuse integration and support for default prompts.
+PromptProvider - a library for managing prompts with Langfuse integration and support for default prompts.
 
 ## Installation
 
