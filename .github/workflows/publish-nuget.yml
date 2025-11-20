@@ -1,0 +1,84 @@
+name: publish-nuget
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Override version (optional, e.g. 0.1.2)'
+        required: false
+        type: string
+
+jobs:
+  pack-and-push:
+    runs-on: ubuntu-latest
+
+    env:
+      LIB_PROJ: PromptProvider/PromptProvider.csproj
+      TEST_PROJ: Tests/PromptProvider.Tests/PromptProvider.Tests.csproj
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Verify projects exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -f "$LIB_PROJ" ]] || { echo "Library not found: $LIB_PROJ"; exit 1; }
+          echo "Library: $LIB_PROJ"
+      - name: Restore
+        shell: bash
+        run: |
+          dotnet restore "$TEST_PROJ"
+
+      - name: Build library
+        shell: bash
+        run: |
+          dotnet build "$LIB_PROJ" -c Release -p:ContinuousIntegrationBuild=true --no-restore
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            PKGVER="${{ github.event.inputs.version }}"
+          else
+            PKGVER=$(grep -oPm1 '(?<=<Version>)[^<]+' "$LIB_PROJ" || true)
+            if [ -z "$PKGVER" ]; then
+              echo "<Version> not found in $LIB_PROJ" >&2
+              exit 1
+            fi
+          fi
+          echo "PKGVER=$PKGVER" >> $GITHUB_ENV
+          echo "Using version: $PKGVER"
+
+      - name: Pack
+        shell: bash
+        run: |
+          dotnet pack "$LIB_PROJ" -c Release \
+            -p:Version="${PKGVER}" \
+            -p:IncludeSymbols=true -p:SymbolPackageFormat=snupkg \
+            -o ./artifacts \
+            --no-build
+
+      - name: Push to nuget.org
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${NUGET_API_KEY:-}" ]; then
+            echo "NUGET_API_KEY secret is not set." >&2
+            exit 1
+          fi
+          dotnet nuget push "./artifacts/*.nupkg"  --skip-duplicate --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json
+          if ls ./artifacts/*.snupkg 1> /dev/null 2>&1; then
+            dotnet nuget push "./artifacts/*.snupkg" --skip-duplicate --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json
+          else
+            echo "No symbol packages (.snupkg) found to push."
+          fi
