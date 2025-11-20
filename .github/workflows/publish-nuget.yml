@@ -15,9 +15,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      LIB_PROJ: PromptProvider/PromptProvider.csproj
-      TEST_PROJ: Tests/PromptProvider.Tests/PromptProvider.Tests.csproj
-
+      LIB_PROJ: PromptProvider.csproj
     steps:
       - uses: actions/checkout@v4
 
