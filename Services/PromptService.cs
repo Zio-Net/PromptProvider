@@ -49,11 +49,15 @@ public class PromptService : IPromptService
 
         try
         {
-            _logger.LogInformation("Creating prompt '{PromptKey}' in Langfuse", request.PromptKey);
+            // Allow passing a logical key that maps to actual Langfuse key
+            var promptKeys = _defaultPromptsProvider.GetPromptKeys();
+            var actualKey = promptKeys != null && promptKeys.TryGetValue(request.PromptKey, out var mapped) ? mapped : request.PromptKey;
+
+            _logger.LogInformation("Creating prompt '{PromptKey}' (actual: {ActualKey}) in Langfuse", request.PromptKey, actualKey);
 
             var langfuseRequest = new CreateLangfusePromptRequest
             {
-                Name = request.PromptKey,
+                Name = actualKey,
                 Prompt = request.Content,
                 Type = "text",
                 CommitMessage = request.CommitMessage,
@@ -93,19 +97,25 @@ public class PromptService : IPromptService
             throw new ArgumentException("PromptKey is required.", nameof(promptKey));
         }
 
+        var logicalKey = promptKey; // keep original for local fallback
+
+        // If the promptKey matches a configured logical key, use its mapping (string -> actual langfuse key)
+        var promptKeys = _defaultPromptsProvider.GetPromptKeys();
+        var actualKey = promptKeys != null && promptKeys.TryGetValue(logicalKey, out var mappedKey) ? mappedKey : logicalKey;
+
         // If Langfuse is configured, try to fetch from it first
         if (_langfuseOptions.Value.IsConfigured())
         {
             try
             {
-                _logger.LogInformation("Fetching prompt '{PromptKey}' (version: {Version}, label: {Label}) from Langfuse",
-                    promptKey, version, label);
+                _logger.LogInformation("Fetching prompt '{LogicalKey}' -> '{ActualKey}' (version: {Version}, label: {Label}) from Langfuse",
+                    logicalKey, actualKey, version, label);
 
-                var langfusePrompt = await _langfuseService.GetPromptAsync(promptKey, version, label, cancellationToken);
+                var langfusePrompt = await _langfuseService.GetPromptAsync(actualKey, version, label, cancellationToken);
 
                 if (langfusePrompt != null)
                 {
-                    _logger.LogInformation("Successfully retrieved prompt '{PromptKey}' from Langfuse", promptKey);
+                    _logger.LogInformation("Successfully retrieved prompt '{LogicalKey}' from Langfuse", logicalKey);
                     return new PromptResponse
                     {
                         PromptKey = langfusePrompt.Name,
@@ -119,20 +129,20 @@ public class PromptService : IPromptService
                     };
                 }
 
-                _logger.LogWarning("Prompt '{PromptKey}' not found in Langfuse, falling back to local defaults", promptKey);
+                _logger.LogWarning("Prompt '{LogicalKey}' not found in Langfuse, falling back to local defaults", logicalKey);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Error retrieving prompt '{PromptKey}' from Langfuse, falling back to local defaults", promptKey);
+                _logger.LogWarning(ex, "Error retrieving prompt '{LogicalKey}' from Langfuse, falling back to local defaults", logicalKey);
             }
         }
         else
         {
-            _logger.LogInformation("Langfuse is not configured, using local defaults for prompt '{PromptKey}'", promptKey);
+            _logger.LogInformation("Langfuse is not configured, using local defaults for prompt '{LogicalKey}'", logicalKey);
         }
 
-        // Always fallback to local defaults
-        return GetPromptFromDefaults(promptKey);
+        // Always fallback to local defaults using the logical key
+        return GetPromptFromDefaults(logicalKey);
     }
 
     public async Task<List<LangfusePromptListItem>> GetAllPromptsAsync(CancellationToken cancellationToken = default)
@@ -209,10 +219,14 @@ public class PromptService : IPromptService
 
         try
         {
-            _logger.LogInformation("Updating labels for prompt '{PromptKey}' version {Version} in Langfuse",
-                promptKey, version);
+            // Map logical key to actual langfuse key if configured
+            var promptKeys = _defaultPromptsProvider.GetPromptKeys();
+            var actualKey = promptKeys != null && promptKeys.TryGetValue(promptKey, out var mapped) ? mapped : promptKey;
 
-            var updated = await _langfuseService.UpdatePromptLabelsAsync(promptKey, version, request, cancellationToken);
+            _logger.LogInformation("Updating labels for prompt '{PromptKey}' (actual: {ActualKey}) version {Version} in Langfuse",
+                promptKey, actualKey, version);
+
+            var updated = await _langfuseService.UpdatePromptLabelsAsync(actualKey, version, request, cancellationToken);
 
             return new PromptResponse
             {
