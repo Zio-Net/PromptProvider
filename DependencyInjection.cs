@@ -10,10 +10,12 @@ public static class DependencyInjection
     public static IServiceCollection AddPromptProvider(
         this IServiceCollection services,
         Action<LangfuseOptions>? configureLangfuse = null,
-        Action<PromptsOptions>? configurePrompts = null)
+        Action<PromptsOptions>? configurePrompts = null,
+        Action<PromptKeyOptions>? configurePromptKeys = null)
     {
         if (configureLangfuse is not null) services.Configure(configureLangfuse);
         if (configurePrompts is not null) services.Configure(configurePrompts);
+        if (configurePromptKeys is not null) services.Configure(configurePromptKeys);
 
         services.AddHttpClient<ILangfuseService, LangfuseService>((serviceProvider, client) =>
         {
