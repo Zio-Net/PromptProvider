@@ -1,3 +1,5 @@
+using PromptProvider.Models;
+
 namespace PromptProvider.Options;
 
 public class PromptKeyOptions

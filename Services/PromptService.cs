@@ -51,7 +51,15 @@ public class PromptService : IPromptService
         {
             // Allow passing a logical key that maps to actual Langfuse key
             var promptKeys = _defaultPromptsProvider.GetPromptKeys();
-            var actualKey = promptKeys != null && promptKeys.TryGetValue(request.PromptKey, out var mapped) ? mapped : request.PromptKey;
+            string actualKey;
+            if (promptKeys != null && promptKeys.TryGetValue(request.PromptKey, out var mappedConfig) && mappedConfig is PromptConfiguration config && !string.IsNullOrWhiteSpace(config.Key))
+            {
+                actualKey = config.Key;
+            }
+            else
+            {
+                actualKey = request.PromptKey;
+            }
 
             _logger.LogInformation("Creating prompt '{PromptKey}' (actual: {ActualKey}) in Langfuse", request.PromptKey, actualKey);
 
@@ -101,7 +109,15 @@ public class PromptService : IPromptService
 
         // If the promptKey matches a configured logical key, use its mapping (string -> actual langfuse key)
         var promptKeys = _defaultPromptsProvider.GetPromptKeys();
-        var actualKey = promptKeys != null && promptKeys.TryGetValue(logicalKey, out var mappedKey) ? mappedKey : logicalKey;
+        string actualKey;
+        if (promptKeys != null && promptKeys.TryGetValue(logicalKey, out var mappedConfig) && mappedConfig is PromptConfiguration config && !string.IsNullOrWhiteSpace(config.Key))
+        {
+            actualKey = config.Key;
+        }
+        else
+        {
+            actualKey = logicalKey;
+        }
 
         // If Langfuse is configured, try to fetch from it first
         if (_langfuseOptions.Value.IsConfigured())
@@ -221,7 +237,15 @@ public class PromptService : IPromptService
         {
             // Map logical key to actual langfuse key if configured
             var promptKeys = _defaultPromptsProvider.GetPromptKeys();
-            var actualKey = promptKeys != null && promptKeys.TryGetValue(promptKey, out var mapped) ? mapped : promptKey;
+            string actualKey;
+            if (promptKeys != null && promptKeys.TryGetValue(promptKey, out var mappedConfig) && mappedConfig is PromptConfiguration config && !string.IsNullOrWhiteSpace(config.Key))
+            {
+                actualKey = config.Key;
+            }
+            else
+            {
+                actualKey = promptKey;
+            }
 
             _logger.LogInformation("Updating labels for prompt '{PromptKey}' (actual: {ActualKey}) version {Version} in Langfuse",
                 promptKey, actualKey, version);

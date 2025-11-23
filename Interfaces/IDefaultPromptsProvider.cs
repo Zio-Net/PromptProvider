@@ -1,5 +1,6 @@
 namespace PromptProvider.Interfaces;
 
+using PromptProvider.Models;
 using PromptProvider.Options;
 
 public interface IDefaultPromptsProvider

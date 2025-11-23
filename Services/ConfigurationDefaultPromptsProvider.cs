@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using PromptProvider.Interfaces;
+using PromptProvider.Models;
 using PromptProvider.Options;
 
 namespace PromptProvider.Services;
