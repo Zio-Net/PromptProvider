@@ -14,7 +14,9 @@ public sealed class PromptConfiguration
 
     /// <summary>
     /// Optional label to use (e.g., "production", "staging", "latest")
-    /// If neither version nor label is specified, defaults to "production"
+    /// When configured, this label will be automatically used when fetching the prompt,
+    /// unless explicitly overridden by passing a different label to GetPromptAsync/GetChatPromptAsync.
+    /// If neither version nor label is specified, Langfuse will use its default behavior.
     /// </summary>
     public string? Label { get; set; }
 }

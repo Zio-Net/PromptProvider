@@ -166,9 +166,15 @@ public class PromptService(
         // If the promptKey matches a configured logical key, use its mapping (string -> actual langfuse key)
         var promptKeys = _defaultPromptsProvider.GetPromptKeys();
         string actualKey;
+        string? effectiveLabel = label; // Start with the provided label
         if (promptKeys != null && promptKeys.TryGetValue(logicalKey, out var mappedConfig) && mappedConfig is PromptConfiguration config && !string.IsNullOrWhiteSpace(config.Key))
         {
             actualKey = config.Key;
+            // If no label was explicitly provided, use the configured label (if any)
+            if (label == null && !string.IsNullOrWhiteSpace(config.Label))
+            {
+                effectiveLabel = config.Label;
+            }
         }
         else
         {
@@ -181,9 +187,9 @@ public class PromptService(
             try
             {
                 _logger.LogInformation("Fetching prompt '{LogicalKey}' -> '{ActualKey}' (version: {Version}, label: {Label}) from Langfuse",
-                    logicalKey, actualKey, version, label);
+                    logicalKey, actualKey, version, effectiveLabel);
 
-                var langfusePrompt = await _langfuseService.GetPromptAsync(actualKey, version, label, cancellationToken);
+                var langfusePrompt = await _langfuseService.GetPromptAsync(actualKey, version, effectiveLabel, cancellationToken);
 
                 if (langfusePrompt != null)
                 {
@@ -233,9 +239,15 @@ public class PromptService(
         // If the promptKey matches a configured logical key, use its mapping
         var promptKeys = _defaultPromptsProvider.GetPromptKeys();
         string actualKey;
+        string? effectiveLabel = label; // Start with the provided label
         if (promptKeys != null && promptKeys.TryGetValue(logicalKey, out var mappedConfig) && mappedConfig is PromptConfiguration config && !string.IsNullOrWhiteSpace(config.Key))
         {
             actualKey = config.Key;
+            // If no label was explicitly provided, use the configured label (if any)
+            if (label == null && !string.IsNullOrWhiteSpace(config.Label))
+            {
+                effectiveLabel = config.Label;
+            }
         }
         else
         {
@@ -248,9 +260,9 @@ public class PromptService(
             try
             {
                 _logger.LogInformation("Fetching chat prompt '{LogicalKey}' -> '{ActualKey}' (version: {Version}, label: {Label}) from Langfuse",
-                    logicalKey, actualKey, version, label);
+                    logicalKey, actualKey, version, effectiveLabel);
 
-                var langfusePrompt = await _langfuseService.GetChatPromptAsync(actualKey, version, label, cancellationToken);
+                var langfusePrompt = await _langfuseService.GetChatPromptAsync(actualKey, version, effectiveLabel, cancellationToken);
 
                 if (langfusePrompt != null)
                 {

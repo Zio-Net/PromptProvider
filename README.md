@@ -33,7 +33,7 @@ builder.Services.AddPromptProvider(
 
 - `configureLangfuse`: (optional) Bind Langfuse API credentials and URL
 - `configurePrompts`: (optional) Bind local prompt defaults
-- `configurePromptKeys`: (optional) Map logical prompt names to Langfuse keys/labels
+- `configurePromptKeys`: (optional) Map logical prompt names to Langfuse keys/labels. When a label is configured here, it will be used automatically when fetching prompts unless explicitly overridden.
 
 ### 2. Example `appsettings.json`
 
@@ -61,6 +61,11 @@ builder.Services.AddPromptProvider(
   }
 }
 ```
+
+**Note on Labels**: When you configure a `Label` in `PromptKeys`, it will be automatically used when fetching that prompt. For example:
+- If `ChatTitle` is configured with `"Label": "staging"`, calling `GetPromptAsync("ChatTitle")` will fetch the "staging" label from Langfuse
+- You can still override this by explicitly passing a label: `GetPromptAsync("ChatTitle", label: "production")` will use the "production" label instead
+- If no label is configured and none is provided, Langfuse will use its default behavior (typically "production")
 
 ---
 
