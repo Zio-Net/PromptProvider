@@ -1,6 +1,6 @@
-﻿using PromptProvider.Models;
+﻿using Microsoft.Extensions.Logging;
 using PromptProvider.Interfaces;
-using Microsoft.Extensions.Logging;
+using PromptProvider.Models;
 using PromptProvider.Options;
 
 namespace PromptProvider.Services;
@@ -11,6 +11,7 @@ public class PromptService(
     IDefaultPromptsProvider defaultPromptsProvider,
     Microsoft.Extensions.Options.IOptions<LangfuseOptions> langfuseOptions) : IPromptService
 {
+    private const int DefaultMaxConcurrency = 10;
     private readonly ILogger<PromptService> _logger = logger;
     private readonly ILangfuseService _langfuseService = langfuseService;
     private readonly IDefaultPromptsProvider _defaultPromptsProvider = defaultPromptsProvider;
@@ -19,42 +20,19 @@ public class PromptService(
     public async Task<PromptResponse> CreatePromptAsync(CreatePromptRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ValidateRequired(request.PromptKey, nameof(CreatePromptRequest.PromptKey), "PromptKey is required.");
+        ValidateRequired(request.Content, nameof(CreatePromptRequest.Content), "Content is required.");
 
-        if (string.IsNullOrWhiteSpace(request.PromptKey))
-        {
-            throw new ArgumentException("PromptKey is required.", nameof(request));
-        }
-
-        if (string.IsNullOrWhiteSpace(request.Content))
-        {
-            throw new ArgumentException("Content is required.", nameof(request));
-        }
-
-        if (!_langfuseOptions.Value.IsConfigured())
-        {
-            _logger.LogWarning("Cannot create prompt '{PromptKey}' - Langfuse is not configured", request.PromptKey);
-            throw new InvalidOperationException("Langfuse is not configured. Cannot create prompts.");
-        }
+        EnsureLangfuseConfigured(request.PromptKey, "create prompt");
 
         try
         {
-            // Allow passing a logical key that maps to actual Langfuse key
-            var promptKeys = _defaultPromptsProvider.GetPromptKeys();
-            string actualKey;
-            if (promptKeys != null && promptKeys.TryGetValue(request.PromptKey, out var mappedConfig) && mappedConfig is PromptConfiguration config && !string.IsNullOrWhiteSpace(config.Key))
-            {
-                actualKey = config.Key;
-            }
-            else
-            {
-                actualKey = request.PromptKey;
-            }
-
-            _logger.LogInformation("Creating prompt '{PromptKey}' (actual: {ActualKey}) in Langfuse", request.PromptKey, actualKey);
+            var resolved = ResolvePromptRequest(request.PromptKey, null, null);
+            _logger.LogInformation("Creating prompt for PromptKey '{PromptKey}' with ActualKey '{ActualKey}'", request.PromptKey, resolved.actualKey);
 
             var langfuseRequest = new CreateLangfusePromptRequest
             {
-                Name = actualKey,
+                Name = resolved.actualKey,
                 Prompt = request.Content,
                 Type = "text",
                 CommitMessage = request.CommitMessage,
@@ -63,7 +41,6 @@ public class PromptService(
             };
 
             var created = await _langfuseService.CreatePromptAsync(langfuseRequest, cancellationToken);
-
             return new PromptResponse
             {
                 PromptKey = created.Name,
@@ -71,14 +48,14 @@ public class PromptService(
                 Version = created.Version,
                 Labels = created.Labels,
                 Tags = created.Tags,
-                Type = created.Type,
+                Type = ParsePromptKind(created.Type),
                 Config = created.Config as LangfusePromptConfiguration,
-                Source = "Langfuse"
+                Source = PromptSource.Langfuse
             };
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to create prompt '{PromptKey}' in Langfuse", request.PromptKey);
+            _logger.LogError(ex, "Failed to create prompt for PromptKey '{PromptKey}'", request.PromptKey);
             throw;
         }
     }
@@ -86,42 +63,22 @@ public class PromptService(
     public async Task<ChatPromptResponse> CreateChatPromptAsync(CreateChatPromptRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-
-        if (string.IsNullOrWhiteSpace(request.PromptKey))
-        {
-            throw new ArgumentException("PromptKey is required.", nameof(request));
-        }
-
+        ValidateRequired(request.PromptKey, nameof(request), "PromptKey is required.");
         if (request.ChatMessages == null || request.ChatMessages.Length == 0)
         {
             throw new ArgumentException("ChatMessages are required.", nameof(request));
         }
 
-        if (!_langfuseOptions.Value.IsConfigured())
-        {
-            _logger.LogWarning("Cannot create chat prompt '{PromptKey}' - Langfuse is not configured", request.PromptKey);
-            throw new InvalidOperationException("Langfuse is not configured. Cannot create prompts.");
-        }
+        EnsureLangfuseConfigured(request.PromptKey, "create chat prompt");
 
         try
         {
-            // Allow passing a logical key that maps to actual Langfuse key
-            var promptKeys = _defaultPromptsProvider.GetPromptKeys();
-            string actualKey;
-            if (promptKeys != null && promptKeys.TryGetValue(request.PromptKey, out var mappedConfig) && mappedConfig is PromptConfiguration config && !string.IsNullOrWhiteSpace(config.Key))
-            {
-                actualKey = config.Key;
-            }
-            else
-            {
-                actualKey = request.PromptKey;
-            }
-
-            _logger.LogInformation("Creating chat prompt '{PromptKey}' (actual: {ActualKey}) in Langfuse", request.PromptKey, actualKey);
+            var resolved = ResolvePromptRequest(request.PromptKey, null, null);
+            _logger.LogInformation("Creating chat prompt for PromptKey '{PromptKey}' with ActualKey '{ActualKey}'", request.PromptKey, resolved.actualKey);
 
             var langfuseRequest = new CreateLangfuseChatPromptRequest
             {
-                Name = actualKey,
+                Name = resolved.actualKey,
                 Prompt = request.ChatMessages,
                 Type = "chat",
                 CommitMessage = request.CommitMessage,
@@ -130,7 +87,6 @@ public class PromptService(
             };
 
             var created = await _langfuseService.CreateChatPromptAsync(langfuseRequest, cancellationToken);
-
             return new ChatPromptResponse
             {
                 PromptKey = created.Name,
@@ -138,47 +94,34 @@ public class PromptService(
                 Version = created.Version,
                 Labels = created.Labels,
                 Tags = created.Tags,
-                Type = created.Type,
+                Type = ParsePromptKind(created.Type),
                 Config = created.Config as LangfusePromptConfiguration,
-                Source = "Langfuse"
+                Source = PromptSource.Langfuse
             };
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to create chat prompt '{PromptKey}' in Langfuse", request.PromptKey);
+            _logger.LogError(ex, "Failed to create chat prompt for PromptKey '{PromptKey}'", request.PromptKey);
             throw;
         }
     }
 
-    public async Task<PromptResponse?> GetPromptAsync(
-        string promptKey,
-        int? version = null,
-        string? label = null,
-        CancellationToken cancellationToken = default)
+    public async Task<PromptResponse?> GetPromptAsync(string promptKey, int? version = null, string? label = null, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(promptKey))
-        {
-            throw new ArgumentException("PromptKey is required.", nameof(promptKey));
-        }
+        ValidateRequired(promptKey, nameof(promptKey), "PromptKey is required.");
+        var resolved = ResolvePromptRequest(promptKey, version, label);
 
-        var logicalKey = promptKey; // keep original for local fallback
-
-        // Resolve the actual Langfuse key and effective label
-        var (actualKey, effectiveLabel) = ResolvePromptKeyAndLabel(logicalKey, label);
-
-        // If Langfuse is configured, try to fetch from it first
         if (_langfuseOptions.Value.IsConfigured())
         {
             try
             {
-                _logger.LogInformation("Fetching prompt '{LogicalKey}' -> '{ActualKey}' (version: {Version}, label: {Label}) from Langfuse",
-                    logicalKey, actualKey, version, effectiveLabel);
+                _logger.LogInformation(PromptLoggingEvents.LangfuseFetchPrompt,
+                    "Fetching prompt with PromptKey '{PromptKey}', ActualKey '{ActualKey}', Version '{Version}', Label '{Label}'",
+                    promptKey, resolved.actualKey, resolved.version, resolved.label);
 
-                var langfusePrompt = await _langfuseService.GetPromptAsync(actualKey, version, effectiveLabel, cancellationToken);
-
+                var langfusePrompt = await _langfuseService.GetPromptAsync(resolved.actualKey, resolved.version, resolved.label, cancellationToken);
                 if (langfusePrompt != null)
                 {
-                    _logger.LogInformation("Successfully retrieved prompt '{LogicalKey}' from Langfuse", logicalKey);
                     return new PromptResponse
                     {
                         PromptKey = langfusePrompt.Name,
@@ -186,57 +129,43 @@ public class PromptService(
                         Version = langfusePrompt.Version,
                         Labels = langfusePrompt.Labels,
                         Tags = langfusePrompt.Tags,
-                        Type = langfusePrompt.Type,
+                        Type = ParsePromptKind(langfusePrompt.Type),
                         Config = langfusePrompt.Config,
-                        Source = "Langfuse"
+                        Source = PromptSource.Langfuse
                     };
                 }
-
-                _logger.LogWarning("Prompt '{LogicalKey}' not found in Langfuse, falling back to local defaults", logicalKey);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Error retrieving prompt '{LogicalKey}' from Langfuse, falling back to local defaults", logicalKey);
+                _logger.LogWarning(PromptLoggingEvents.LangfuseFallback, ex,
+                    "Failed remote prompt fetch for PromptKey '{PromptKey}', ActualKey '{ActualKey}'. Falling back to local defaults.",
+                    promptKey, resolved.actualKey);
             }
         }
-        else
-        {
-            _logger.LogInformation("Langfuse is not configured, using local defaults for prompt '{LogicalKey}'", logicalKey);
-        }
 
-        // Always fallback to local defaults using the logical key
-        return GetPromptFromDefaults(logicalKey);
+        return GetPromptFromDefaults(promptKey);
     }
 
-    public async Task<ChatPromptResponse?> GetChatPromptAsync(
-        string promptKey,
-        int? version = null,
-        string? label = null,
-        CancellationToken cancellationToken = default)
+    public async Task<ChatPromptResponse?> GetChatPromptAsync(string promptKey, int? version = null, string? label = null, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(promptKey))
-        {
-            throw new ArgumentException("PromptKey is required.", nameof(promptKey));
-        }
+        ValidateRequired(promptKey, nameof(promptKey), "PromptKey is required.");
+        var resolved = ResolvePromptRequest(promptKey, version, label);
 
-        var logicalKey = promptKey;
-
-        // Resolve the actual Langfuse key and effective label
-        var (actualKey, effectiveLabel) = ResolvePromptKeyAndLabel(logicalKey, label);
-
-        // If Langfuse is configured, try to fetch from it first
         if (_langfuseOptions.Value.IsConfigured())
         {
             try
             {
-                _logger.LogInformation("Fetching chat prompt '{LogicalKey}' -> '{ActualKey}' (version: {Version}, label: {Label}) from Langfuse",
-                    logicalKey, actualKey, version, effectiveLabel);
+                _logger.LogInformation(PromptLoggingEvents.LangfuseFetchChatPrompt,
+                    "Fetching chat prompt with PromptKey '{PromptKey}', ActualKey '{ActualKey}', Version '{Version}', Label '{Label}'",
+                    promptKey, resolved.actualKey, resolved.version, resolved.label);
 
-                var langfusePrompt = await _langfuseService.GetChatPromptAsync(actualKey, version, effectiveLabel, cancellationToken);
-
+                var langfusePrompt = await _langfuseService.GetChatPromptAsync(resolved.actualKey, resolved.version, resolved.label, cancellationToken);
                 if (langfusePrompt != null)
                 {
-                    _logger.LogInformation("Successfully retrieved chat prompt '{LogicalKey}' from Langfuse", logicalKey);
                     return new ChatPromptResponse
                     {
                         PromptKey = langfusePrompt.Name,
@@ -244,73 +173,82 @@ public class PromptService(
                         Version = langfusePrompt.Version,
                         Labels = langfusePrompt.Labels,
                         Tags = langfusePrompt.Tags,
-                        Type = langfusePrompt.Type,
+                        Type = ParsePromptKind(langfusePrompt.Type),
                         Config = langfusePrompt.Config,
-                        Source = "Langfuse"
+                        Source = PromptSource.Langfuse
                     };
                 }
-
-                _logger.LogWarning("Chat prompt '{LogicalKey}' not found in Langfuse, falling back to local defaults", logicalKey);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Error retrieving chat prompt '{LogicalKey}' from Langfuse, falling back to local defaults", logicalKey);
+                _logger.LogWarning(PromptLoggingEvents.LangfuseFallback, ex,
+                    "Failed remote chat prompt fetch for PromptKey '{PromptKey}', ActualKey '{ActualKey}'. Falling back to local defaults.",
+                    promptKey, resolved.actualKey);
             }
         }
-        else
-        {
-            _logger.LogInformation("Langfuse is not configured, using local defaults for chat prompt '{LogicalKey}'", logicalKey);
-        }
 
-        // Fallback to local defaults using the logical key
-        return GetChatPromptFromDefaults(logicalKey);
+        return GetChatPromptFromDefaults(promptKey);
     }
 
-    public async Task<List<LangfusePromptListItem>> GetAllPromptsAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<LangfusePromptListItem>> GetAllPromptsAsync(CancellationToken cancellationToken = default)
     {
-        if (!_langfuseOptions.Value.IsConfigured())
-        {
-            _logger.LogWarning("Cannot get all prompts - Langfuse is not configured");
-            throw new InvalidOperationException("Langfuse is not configured. Cannot retrieve prompts list.");
-        }
-
-        try
-        {
-            _logger.LogInformation("Fetching all prompts from Langfuse");
-            return await _langfuseService.GetAllPromptsAsync(cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to retrieve all prompts from Langfuse");
-            throw;
-        }
+        EnsureLangfuseConfigured("*", "get all prompts");
+        return await _langfuseService.GetAllPromptsAsync(cancellationToken);
     }
 
-    public async Task<List<PromptResponse>> GetPromptsAsync(
+    public async Task<IReadOnlyList<PromptResponse>> GetPromptsAsync(
         IEnumerable<string> promptKeys,
         string? label = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(promptKeys);
 
-        var keys = promptKeys.Where(k => !string.IsNullOrWhiteSpace(k)).Distinct().ToList();
-        if (keys.Count == 0)
+        var keys = promptKeys.Where(k => !string.IsNullOrWhiteSpace(k)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (keys.Length == 0)
         {
             throw new ArgumentException("At least one prompt key is required.", nameof(promptKeys));
         }
 
-        var results = new List<PromptResponse>();
+        // Determine concurrency limit: honor MaxConnectionsPerServer if configured and valid (> 0), otherwise use default
+        var configuredMaxConcurrency = _langfuseOptions.Value.HttpClient?.MaxConnectionsPerServer;
+        var maxConcurrency = configuredMaxConcurrency is > 0 ? configuredMaxConcurrency.Value : DefaultMaxConcurrency;
+        using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
 
-        foreach (var key in keys)
+        var tasks = keys.Select(async key =>
         {
-            var prompt = await GetPromptAsync(key, label: label, cancellationToken: cancellationToken);
-            if (prompt != null)
+            var acquired = false;
+            try
             {
-                results.Add(prompt);
-            }
-        }
+                await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+                acquired = true;
 
-        return results;
+                return await GetPromptAsync(key, label: label, cancellationToken: cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(PromptLoggingEvents.BatchPromptItemFailed, ex,
+                    "Batch fetch failed for PromptKey '{PromptKey}'. Continuing with other keys.", key);
+                return null;
+            }
+            finally
+            {
+                if (acquired)
+                {
+                    semaphore.Release();
+                }
+            }
+        });
+
+        var results = await Task.WhenAll(tasks);
+        return results.Where(r => r is not null).Select(r => r!).ToArray();
     }
 
     public async Task<PromptResponse> UpdatePromptLabelsAsync(
@@ -319,123 +257,123 @@ public class PromptService(
         UpdatePromptLabelsRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(promptKey))
-        {
-            throw new ArgumentException("PromptKey is required.", nameof(promptKey));
-        }
-
+        ValidateRequired(promptKey, nameof(promptKey), "PromptKey is required.");
         ArgumentNullException.ThrowIfNull(request);
 
-        if (!_langfuseOptions.Value.IsConfigured())
+        EnsureLangfuseConfigured(promptKey, "update prompt labels");
+
+        var resolved = ResolvePromptRequest(promptKey, version, null);
+        var updated = await _langfuseService.UpdatePromptLabelsAsync(resolved.actualKey, resolved.version ?? version, request, cancellationToken);
+
+        if (!string.Equals(updated.Type, "text", StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogWarning("Cannot update prompt '{PromptKey}' - Langfuse is not configured", promptKey);
-            throw new InvalidOperationException("Langfuse is not configured. Cannot update prompts.");
+            throw new InvalidOperationException($"Expected text prompt but received {updated.Type} prompt");
         }
 
-        try
+        return new PromptResponse
         {
-            // Map logical key to actual langfuse key if configured
-            var promptKeys = _defaultPromptsProvider.GetPromptKeys();
-            string actualKey;
-            if (promptKeys != null && promptKeys.TryGetValue(promptKey, out var mappedConfig) && mappedConfig is PromptConfiguration config && !string.IsNullOrWhiteSpace(config.Key))
-            {
-                actualKey = config.Key;
-            }
-            else
-            {
-                actualKey = promptKey;
-            }
-
-            _logger.LogInformation("Updating labels for prompt '{PromptKey}' (actual: {ActualKey}) version {Version} in Langfuse",
-                promptKey, actualKey, version);
-
-            var updated = await _langfuseService.UpdatePromptLabelsAsync(actualKey, version, request, cancellationToken);
-
-            if (updated.Type != "text")
-            {
-                throw new InvalidOperationException($"Expected text prompt but received {updated.Type} prompt");
-            }
-
-            if (updated.Prompt == null)
-            {
-                throw new InvalidOperationException("Updated prompt has no text content");
-            }
-
-            return new PromptResponse
-            {
-                PromptKey = updated.Name,
-                Content = updated.Prompt,
-                Version = updated.Version,
-                Labels = updated.Labels,
-                Tags = updated.Tags,
-                Type = updated.Type,
-                Config = updated.Config,
-                Source = "Langfuse"
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to update labels for prompt '{PromptKey}' version {Version}", promptKey, version);
-            throw;
-        }
+            PromptKey = updated.Name,
+            Content = updated.Prompt,
+            Version = updated.Version,
+            Labels = updated.Labels,
+            Tags = updated.Tags,
+            Type = ParsePromptKind(updated.Type),
+            Config = updated.Config,
+            Source = PromptSource.Langfuse
+        };
     }
 
-    private (string actualKey, string? effectiveLabel) ResolvePromptKeyAndLabel(string logicalKey, string? providedLabel)
+    private (string actualKey, int? version, string? label) ResolvePromptRequest(string logicalKey, int? providedVersion, string? providedLabel)
     {
-        var promptKeys = _defaultPromptsProvider.GetPromptKeys();
-        string actualKey;
-        string? effectiveLabel = providedLabel; // Start with the provided label
-        
-        if (promptKeys != null && promptKeys.TryGetValue(logicalKey, out var mappedConfig) && mappedConfig is PromptConfiguration config && !string.IsNullOrWhiteSpace(config.Key))
+        if (!_defaultPromptsProvider.TryGetResolvedPrompt(logicalKey, out var resolved))
         {
-            actualKey = config.Key;
-            // If no label was explicitly provided, use the configured label (if any)
-            if (providedLabel == null && !string.IsNullOrWhiteSpace(config.Label))
-            {
-                effectiveLabel = config.Label;
-            }
+            var fallbackLabel = providedVersion.HasValue ? null : providedLabel;
+            return (logicalKey, providedVersion, fallbackLabel);
+        }
+
+        int? effectiveVersion;
+        string? effectiveLabel;
+
+        if (providedVersion.HasValue)
+        {
+            // Explicit version takes precedence over any configured defaults or labels.
+            effectiveVersion = providedVersion;
+            effectiveLabel = null;
+        }
+        else if (!string.IsNullOrEmpty(providedLabel))
+        {
+            // Explicit label prevents applying a configured default version.
+            effectiveVersion = null;
+            effectiveLabel = providedLabel;
         }
         else
         {
-            actualKey = logicalKey;
+            // No explicit version or label: fall back to configured defaults.
+            effectiveVersion = resolved.Version;
+            effectiveLabel = effectiveVersion.HasValue ? null : resolved.Label;
         }
-        
-        return (actualKey, effectiveLabel);
+        return (resolved.ActualKey, effectiveVersion, effectiveLabel);
     }
 
     private PromptResponse? GetPromptFromDefaults(string promptKey)
     {
-        var defaults = _defaultPromptsProvider.GetDefaults();
-        if (defaults == null || !defaults.TryGetValue(promptKey, out var content))
+        if (_defaultPromptsProvider.TryGetResolvedPrompt(promptKey, out var resolved) && !string.IsNullOrWhiteSpace(resolved.DefaultContent))
         {
-            _logger.LogWarning("Prompt '{PromptKey}' not found in local defaults either", promptKey);
-            return null;
+            _logger.LogInformation(PromptLoggingEvents.LocalDefaultReturned,
+                "Returning local text default for PromptKey '{PromptKey}'", promptKey);
+            return new PromptResponse
+            {
+                PromptKey = promptKey,
+                Content = resolved.DefaultContent,
+                Type = PromptKind.Text,
+                Source = PromptSource.Local
+            };
         }
 
-        _logger.LogInformation("Returning prompt '{PromptKey}' from local defaults", promptKey);
-        return new PromptResponse
-        {
-            PromptKey = promptKey,
-            Content = content,
-            Source = "Local"
-        };
+        return null;
     }
 
     private ChatPromptResponse? GetChatPromptFromDefaults(string promptKey)
     {
-        var chatDefaults = _defaultPromptsProvider.GetChatDefaults();
-        if (chatDefaults == null || !chatDefaults.TryGetValue(promptKey, out var chatMessages))
+        if (_defaultPromptsProvider.TryGetResolvedPrompt(promptKey, out var resolved) && resolved.ChatDefaultContent is { Length: > 0 })
         {
-            _logger.LogWarning("Chat prompt '{PromptKey}' not found in local defaults", promptKey);
-            return null;
+            _logger.LogInformation(PromptLoggingEvents.LocalDefaultReturned,
+                "Returning local chat default for PromptKey '{PromptKey}'", promptKey);
+            return new ChatPromptResponse
+            {
+                PromptKey = promptKey,
+                ChatMessages = resolved.ChatDefaultContent,
+                Type = PromptKind.Chat,
+                Source = PromptSource.Local
+            };
         }
 
-        _logger.LogInformation("Returning chat prompt '{PromptKey}' from local defaults", promptKey);
-        return new ChatPromptResponse
+        return null;
+    }
+
+    private void EnsureLangfuseConfigured(string promptKey, string operation)
+    {
+        if (_langfuseOptions.Value.IsConfigured())
         {
-            PromptKey = promptKey,
-            ChatMessages = chatMessages,
-            Source = "Local"
-        };
+            return;
+        }
+
+        _logger.LogWarning("Cannot {Operation} for PromptKey '{PromptKey}' because Langfuse is not configured", operation, promptKey);
+        throw new InvalidOperationException("Langfuse is not configured.");
+    }
+
+    private static PromptKind ParsePromptKind(string? type)
+    {
+        if (string.Equals(type, "text", StringComparison.OrdinalIgnoreCase)) return PromptKind.Text;
+        if (string.Equals(type, "chat", StringComparison.OrdinalIgnoreCase)) return PromptKind.Chat;
+        return PromptKind.Unknown;
+    }
+
+    private static void ValidateRequired(string? value, string argumentName, string message)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException(message, argumentName);
+        }
     }
 }

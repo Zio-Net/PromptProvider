@@ -2,6 +2,6 @@ namespace PromptProvider.Models;
 
 public sealed record GetPromptsBatchResponse
 {
-    public required List<PromptResponse> Prompts { get; init; }
-    public required List<string> NotFound { get; init; }
+    public required IReadOnlyList<PromptResponse> Prompts { get; init; }
+    public required IReadOnlyList<string> NotFound { get; init; }
 }
