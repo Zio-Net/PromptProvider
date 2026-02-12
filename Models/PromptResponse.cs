@@ -7,7 +7,7 @@ public record PromptResponse
     public int? Version { get; set; }
     public string[]? Labels { get; set; }
     public string[]? Tags { get; set; }
-    public string? Type { get; set; }
+    public PromptKind Type { get; set; } = PromptKind.Text;
     public LangfusePromptConfiguration? Config { get; set; }
-    public string? Source { get; set; } // "Langfuse" or "Local"
+    public PromptSource Source { get; set; }
 }

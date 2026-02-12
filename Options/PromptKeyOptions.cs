@@ -2,15 +2,11 @@ using PromptProvider.Models;
 
 namespace PromptProvider.Options;
 
+/// <summary>
+/// Legacy mapping options: logical prompt key -> Langfuse key/label/version.
+/// Prefer <see cref="PromptsOptions.PromptEntries"/> and <see cref="PromptsOptions.Entries"/> for new configurations.
+/// </summary>
 public class PromptKeyOptions
 {
-    /// <summary>
-    /// A mapping of logical prompt names to a PromptConfiguration which contains the Langfuse key and optional default label.
-    /// Example in appsettings.json:
-    /// "PromptKeys": {
-    ///   "ChatTitle": { "Key": "chat.title.generate", "Label": "production" },
-    ///   "SystemDefault": { "Key": "prompts.system.default", "Label": "production" }
-    /// }
-    /// </summary>
     public Dictionary<string, PromptConfiguration> PromptKeys { get; set; } = new();
 }

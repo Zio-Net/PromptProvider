@@ -13,9 +13,6 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
   <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
-  </ItemGroup>
-  <ItemGroup>
     <Compile Remove="tests\**\*.cs" />
   </ItemGroup>
   <ItemGroup>
