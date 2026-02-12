@@ -274,11 +274,27 @@ public class PromptService(
             return (logicalKey, providedVersion, fallbackLabel);
         }
 
-        var effectiveVersion = providedVersion ?? resolved.Version;
-        var effectiveLabel = effectiveVersion.HasValue
-            ? null
-            : (providedLabel ?? resolved.Label);
+        int? effectiveVersion;
+        string? effectiveLabel;
 
+        if (providedVersion.HasValue)
+        {
+            // Explicit version takes precedence over any configured defaults or labels.
+            effectiveVersion = providedVersion;
+            effectiveLabel = null;
+        }
+        else if (!string.IsNullOrEmpty(providedLabel))
+        {
+            // Explicit label prevents applying a configured default version.
+            effectiveVersion = null;
+            effectiveLabel = providedLabel;
+        }
+        else
+        {
+            // No explicit version or label: fall back to configured defaults.
+            effectiveVersion = resolved.Version;
+            effectiveLabel = effectiveVersion.HasValue ? null : resolved.Label;
+        }
         return (resolved.ActualKey, effectiveVersion, effectiveLabel);
     }
 
