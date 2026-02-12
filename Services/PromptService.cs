@@ -213,8 +213,9 @@ public class PromptService(
             throw new ArgumentException("At least one prompt key is required.", nameof(promptKeys));
         }
 
-        // Determine concurrency limit: honor MaxConnectionsPerServer if configured, otherwise use default
-        var maxConcurrency = _langfuseOptions.Value.HttpClient?.MaxConnectionsPerServer ?? DefaultMaxConcurrency;
+        // Determine concurrency limit: honor MaxConnectionsPerServer if configured and valid (> 0), otherwise use default
+        var configuredMaxConcurrency = _langfuseOptions.Value.HttpClient?.MaxConnectionsPerServer;
+        var maxConcurrency = configuredMaxConcurrency is > 0 ? configuredMaxConcurrency.Value : DefaultMaxConcurrency;
         using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
 
         var tasks = keys.Select(async key =>
