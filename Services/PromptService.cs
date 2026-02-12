@@ -11,6 +11,7 @@ public class PromptService(
     IDefaultPromptsProvider defaultPromptsProvider,
     Microsoft.Extensions.Options.IOptions<LangfuseOptions> langfuseOptions) : IPromptService
 {
+    private const int DefaultMaxConcurrency = 10;
     private readonly ILogger<PromptService> _logger = logger;
     private readonly ILangfuseService _langfuseService = langfuseService;
     private readonly IDefaultPromptsProvider _defaultPromptsProvider = defaultPromptsProvider;
@@ -212,8 +213,8 @@ public class PromptService(
             throw new ArgumentException("At least one prompt key is required.", nameof(promptKeys));
         }
 
-        // Determine concurrency limit: honor MaxConnectionsPerServer if configured, otherwise default to 10
-        var maxConcurrency = _langfuseOptions.Value.HttpClient.MaxConnectionsPerServer ?? 10;
+        // Determine concurrency limit: honor MaxConnectionsPerServer if configured, otherwise use default
+        var maxConcurrency = _langfuseOptions.Value.HttpClient.MaxConnectionsPerServer ?? DefaultMaxConcurrency;
         using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
 
         var tasks = keys.Select(async key =>
@@ -221,8 +222,9 @@ public class PromptService(
             var acquired = false;
             try
             {
-                await semaphore.WaitAsync(cancellationToken);
+                await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
                 acquired = true;
+
                 return await GetPromptAsync(key, label: label, cancellationToken: cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
