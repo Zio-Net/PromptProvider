@@ -218,9 +218,11 @@ public class PromptService(
 
         var tasks = keys.Select(async key =>
         {
-            await semaphore.WaitAsync(cancellationToken);
+            var acquired = false;
             try
             {
+                await semaphore.WaitAsync(cancellationToken);
+                acquired = true;
                 return await GetPromptAsync(key, label: label, cancellationToken: cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -235,7 +237,10 @@ public class PromptService(
             }
             finally
             {
-                semaphore.Release();
+                if (acquired)
+                {
+                    semaphore.Release();
+                }
             }
         });
 
