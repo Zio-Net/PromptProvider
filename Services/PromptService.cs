@@ -20,8 +20,8 @@ public class PromptService(
     public async Task<PromptResponse> CreatePromptAsync(CreatePromptRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        ValidateRequired(request.PromptKey, nameof(request), "PromptKey is required.");
-        ValidateRequired(request.Content, nameof(request), "Content is required.");
+        ValidateRequired(request.PromptKey, nameof(CreatePromptRequest.PromptKey), "PromptKey is required.");
+        ValidateRequired(request.Content, nameof(CreatePromptRequest.Content), "Content is required.");
 
         EnsureLangfuseConfigured(request.PromptKey, "create prompt");
 
