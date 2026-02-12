@@ -212,8 +212,13 @@ public class PromptService(
             throw new ArgumentException("At least one prompt key is required.", nameof(promptKeys));
         }
 
+        // Determine concurrency limit: honor MaxConnectionsPerServer if configured, otherwise default to 10
+        var maxConcurrency = _langfuseOptions.Value.HttpClient.MaxConnectionsPerServer ?? 10;
+        using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+
         var tasks = keys.Select(async key =>
         {
+            await semaphore.WaitAsync(cancellationToken);
             try
             {
                 return await GetPromptAsync(key, label: label, cancellationToken: cancellationToken);
@@ -227,6 +232,10 @@ public class PromptService(
                 _logger.LogWarning(PromptLoggingEvents.BatchPromptItemFailed, ex,
                     "Batch fetch failed for PromptKey '{PromptKey}'. Continuing with other keys.", key);
                 return null;
+            }
+            finally
+            {
+                semaphore.Release();
             }
         });
 
