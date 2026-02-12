@@ -214,7 +214,7 @@ public class PromptService(
         }
 
         // Determine concurrency limit: honor MaxConnectionsPerServer if configured, otherwise use default
-        var maxConcurrency = _langfuseOptions.Value.HttpClient.MaxConnectionsPerServer ?? DefaultMaxConcurrency;
+        var maxConcurrency = _langfuseOptions.Value.HttpClient?.MaxConnectionsPerServer ?? DefaultMaxConcurrency;
         using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
 
         var tasks = keys.Select(async key =>
