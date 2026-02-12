@@ -169,13 +169,13 @@ public class LangfuseService : ILangfuseService
         if (request.NewLabels is null || request.NewLabels.Length == 0) throw new ArgumentException("At least one label is required.", nameof(request));
 
         var requestUri = $"/api/public/v2/prompts/{Uri.EscapeDataString(promptName)}/versions/{version}";
-        using var response = await SendWithRetryAsync(attempt =>
+        using var response = await SendWithRetryAsync(async attempt =>
             {
-                var message = new HttpRequestMessage(HttpMethod.Patch, requestUri)
+                using var message = new HttpRequestMessage(HttpMethod.Patch, requestUri)
                 {
                     Content = JsonContent.Create(request, options: JsonOptions)
                 };
-                return _httpClient.SendAsync(message, cancellationToken);
+                return await _httpClient.SendAsync(message, cancellationToken);
             }, promptName, cancellationToken);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
