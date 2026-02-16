@@ -1,7 +1,6 @@
 namespace PromptProvider.Interfaces;
 
 using PromptProvider.Models;
-using PromptProvider.Options;
 
 public interface IDefaultPromptsProvider
 {
@@ -10,4 +9,8 @@ public interface IDefaultPromptsProvider
     IReadOnlyDictionary<string, ChatMessage[]> GetChatDefaults();
 
     IReadOnlyDictionary<string, PromptConfiguration> GetPromptKeys();
+
+    IReadOnlyDictionary<string, ResolvedPromptConfiguration> GetResolvedPrompts();
+
+    bool TryGetResolvedPrompt(string logicalKey, out ResolvedPromptConfiguration configuration);
 }

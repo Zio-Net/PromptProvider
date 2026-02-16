@@ -1,11 +1,13 @@
+using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
-using PromptProvider.Models;
-using PromptProvider.Options;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using PromptProvider.Interfaces;
-using Microsoft.Extensions.Logging;
+using PromptProvider.Models;
+using PromptProvider.Options;
 
 namespace PromptProvider.Services;
 
@@ -43,9 +45,7 @@ public class LangfuseService : ILangfuseService
 
     private void ConfigureHttpClient()
     {
-        // Basic authentication with public key as username and secret key as password
-        var authValue = Convert.ToBase64String(
-            Encoding.UTF8.GetBytes($"{_options.PublicKey}:{_options.SecretKey}"));
+        var authValue = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{_options.PublicKey}:{_options.SecretKey}"));
         _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", authValue);
 
         if (string.IsNullOrWhiteSpace(_options.BaseUrl))
@@ -54,6 +54,11 @@ public class LangfuseService : ILangfuseService
         }
 
         _httpClient.BaseAddress = new Uri(_options.BaseUrl);
+
+        if (_options.HttpClient.RequestTimeoutSeconds is > 0)
+        {
+            _httpClient.Timeout = TimeSpan.FromSeconds(_options.HttpClient.RequestTimeoutSeconds.Value);
+        }
     }
 
     private void ThrowIfNotConfigured()
@@ -64,398 +69,184 @@ public class LangfuseService : ILangfuseService
         }
     }
 
-    public async Task<LangfusePromptModel?> GetPromptAsync(
-        string promptName,
-        int? version = null,
-        string? label = null,
-        CancellationToken cancellationToken = default)
+    public async Task<LangfusePromptModel?> GetPromptAsync(string promptName, int? version = null, string? label = null, CancellationToken cancellationToken = default)
     {
         ThrowIfNotConfigured();
+        ValidatePromptName(promptName);
 
-        if (string.IsNullOrWhiteSpace(promptName))
-        {
-            throw new ArgumentException("Prompt name is required.", nameof(promptName));
-        }
-
-        // Default to "production" label if neither version nor label is specified
         if (version is null && string.IsNullOrWhiteSpace(label))
         {
             label = "production";
         }
 
-        try
+        var requestUri = BuildPromptRequestUri(promptName, version, label);
+        using var response = await SendWithRetryAsync(_ => _httpClient.GetAsync(requestUri, cancellationToken), promptName, cancellationToken);
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
         {
-            var queryParams = new List<string>();
-            if (version.HasValue)
-            {
-                queryParams.Add($"version={version.Value}");
-            }
-
-            if (!string.IsNullOrWhiteSpace(label))
-            {
-                queryParams.Add($"label={Uri.EscapeDataString(label)}");
-            }
-
-            var queryString = queryParams.Count > 0 ? "?" + string.Join("&", queryParams) : string.Empty;
-            var requestUri = $"/api/public/v2/prompts/{Uri.EscapeDataString(promptName)}{queryString}";
-
-            _logger.LogInformation("Fetching prompt '{PromptName}' from Langfuse (version: {Version}, label: {Label})",
-                promptName, version, label);
-
-            var response = await _httpClient.GetAsync(requestUri, cancellationToken);
-
-            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-            {
-                _logger.LogWarning("Prompt '{PromptName}' not found in Langfuse", promptName);
-                return null;
-            }
-
-            response.EnsureSuccessStatusCode();
-
-            var content = await response.Content.ReadAsStringAsync(cancellationToken);
-            var prompt = JsonSerializer.Deserialize<LangfusePromptModel>(content, JsonOptions);
-
-            _logger.LogInformation("Successfully fetched prompt '{PromptName}' version {Version}",
-                promptName, prompt?.Version);
-
-            return prompt;
+            return null;
         }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogError(ex, "HTTP error fetching prompt '{PromptName}' from Langfuse", promptName);
-            throw;
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogError(ex, "Failed to deserialize prompt '{PromptName}' from Langfuse", promptName);
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error fetching prompt '{PromptName}' from Langfuse", promptName);
-            throw;
-        }
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<LangfusePromptModel>(JsonOptions, cancellationToken);
     }
 
-    public async Task<LangfuseChatPromptModel?> GetChatPromptAsync(
-        string promptName,
-        int? version = null,
-        string? label = null,
-        CancellationToken cancellationToken = default)
+    public async Task<LangfuseChatPromptModel?> GetChatPromptAsync(string promptName, int? version = null, string? label = null, CancellationToken cancellationToken = default)
     {
         ThrowIfNotConfigured();
+        ValidatePromptName(promptName);
 
-        if (string.IsNullOrWhiteSpace(promptName))
-        {
-            throw new ArgumentException("Prompt name is required.", nameof(promptName));
-        }
-
-        // Default to "production" label if neither version nor label is specified
         if (version is null && string.IsNullOrWhiteSpace(label))
         {
             label = "production";
         }
 
-        try
+        var requestUri = BuildPromptRequestUri(promptName, version, label);
+        using var response = await SendWithRetryAsync(_ => _httpClient.GetAsync(requestUri, cancellationToken), promptName, cancellationToken);
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
         {
-            var queryParams = new List<string>();
-            if (version.HasValue)
-            {
-                queryParams.Add($"version={version.Value}");
-            }
-
-            if (!string.IsNullOrWhiteSpace(label))
-            {
-                queryParams.Add($"label={Uri.EscapeDataString(label)}");
-            }
-
-            var queryString = queryParams.Count > 0 ? "?" + string.Join("&", queryParams) : string.Empty;
-            var requestUri = $"/api/public/v2/prompts/{Uri.EscapeDataString(promptName)}{queryString}";
-
-            _logger.LogInformation("Fetching chat prompt '{PromptName}' from Langfuse (version: {Version}, label: {Label})",
-                promptName, version, label);
-
-            var response = await _httpClient.GetAsync(requestUri, cancellationToken);
-
-            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-            {
-                _logger.LogWarning("Chat prompt '{PromptName}' not found in Langfuse", promptName);
-                return null;
-            }
-
-            response.EnsureSuccessStatusCode();
-
-            var content = await response.Content.ReadAsStringAsync(cancellationToken);
-            var prompt = JsonSerializer.Deserialize<LangfuseChatPromptModel>(content, JsonOptions);
-
-            _logger.LogInformation("Successfully fetched chat prompt '{PromptName}' version {Version}",
-                promptName, prompt?.Version);
-
-            return prompt;
+            return null;
         }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogError(ex, "HTTP error fetching chat prompt '{PromptName}' from Langfuse", promptName);
-            throw;
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogError(ex, "Failed to deserialize chat prompt '{PromptName}' from Langfuse", promptName);
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error fetching chat prompt '{PromptName}' from Langfuse", promptName);
-            throw;
-        }
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<LangfuseChatPromptModel>(JsonOptions, cancellationToken);
     }
 
-    public async Task<List<LangfusePromptListItem>> GetAllPromptsAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<LangfusePromptListItem>> GetAllPromptsAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfNotConfigured();
 
-        try
-        {
-            _logger.LogInformation("Fetching all prompts from Langfuse");
+        using var response = await SendWithRetryAsync(_ => _httpClient.GetAsync("/api/public/v2/prompts", cancellationToken), "*", cancellationToken);
+        response.EnsureSuccessStatusCode();
 
-            var response = await _httpClient.GetAsync("/api/public/v2/prompts", cancellationToken);
-            response.EnsureSuccessStatusCode();
+        var paginatedResponse = await response.Content.ReadFromJsonAsync<LangfusePromptsListResponse>(JsonOptions, cancellationToken);
+        return paginatedResponse?.Data ?? [];
+    }
 
-            var content = await response.Content.ReadAsStringAsync(cancellationToken);
+    public async Task<CreateLangfusePromptResponse> CreatePromptAsync(CreateLangfusePromptRequest request, CancellationToken cancellationToken = default)
+    {
+        ThrowIfNotConfigured();
+        ArgumentNullException.ThrowIfNull(request);
+        ValidatePromptName(request.Name);
+        if (string.IsNullOrWhiteSpace(request.Prompt)) throw new ArgumentException("Prompt content is required.", nameof(request));
+        if (string.IsNullOrWhiteSpace(request.Type)) throw new ArgumentException("Prompt type is required.", nameof(request));
 
-            // Deserialize the paginated response
-            var paginatedResponse = JsonSerializer.Deserialize<LangfusePromptsListResponse>(content, JsonOptions);
-            if (paginatedResponse?.Data != null)
+        using var response = await SendWithRetryAsync(
+            _ => _httpClient.PostAsJsonAsync("/api/public/v2/prompts", request, JsonOptions, cancellationToken),
+            request.Name,
+            cancellationToken);
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<CreateLangfusePromptResponse>(JsonOptions, cancellationToken)
+            ?? throw new InvalidOperationException("Failed to deserialize created prompt response");
+    }
+
+    public async Task<CreateLangfuseChatPromptResponse> CreateChatPromptAsync(CreateLangfuseChatPromptRequest request, CancellationToken cancellationToken = default)
+    {
+        ThrowIfNotConfigured();
+        ArgumentNullException.ThrowIfNull(request);
+        ValidatePromptName(request.Name);
+        if (request.Prompt is null || request.Prompt.Length == 0) throw new ArgumentException("Chat messages are required.", nameof(request));
+        if (string.IsNullOrWhiteSpace(request.Type)) throw new ArgumentException("Prompt type is required.", nameof(request));
+
+        using var response = await SendWithRetryAsync(
+            _ => _httpClient.PostAsJsonAsync("/api/public/v2/prompts", request, JsonOptions, cancellationToken),
+            request.Name,
+            cancellationToken);
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<CreateLangfuseChatPromptResponse>(JsonOptions, cancellationToken)
+            ?? throw new InvalidOperationException("Failed to deserialize created chat prompt response");
+    }
+
+    public async Task<LangfusePromptModel> UpdatePromptLabelsAsync(string promptName, int version, UpdatePromptLabelsRequest request, CancellationToken cancellationToken = default)
+    {
+        ThrowIfNotConfigured();
+        ValidatePromptName(promptName);
+        if (version <= 0) throw new ArgumentException("Version must be greater than 0.", nameof(version));
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.NewLabels is null || request.NewLabels.Length == 0) throw new ArgumentException("At least one label is required.", nameof(request));
+
+        var requestUri = $"/api/public/v2/prompts/{Uri.EscapeDataString(promptName)}/versions/{version}";
+        using var response = await SendWithRetryAsync(async attempt =>
             {
-                _logger.LogInformation("Successfully fetched {Count} prompts from Langfuse",
-                    paginatedResponse.Data.Count);
-                return paginatedResponse.Data;
+                using var message = new HttpRequestMessage(HttpMethod.Patch, requestUri)
+                {
+                    Content = JsonContent.Create(request, options: JsonOptions)
+                };
+                return await _httpClient.SendAsync(message, cancellationToken);
+            }, promptName, cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            throw new InvalidOperationException($"Prompt '{promptName}' version {version} not found");
+        }
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<LangfusePromptModel>(JsonOptions, cancellationToken)
+            ?? throw new InvalidOperationException("Failed to deserialize updated prompt response");
+    }
+
+    private async Task<HttpResponseMessage> SendWithRetryAsync(Func<int, Task<HttpResponseMessage>> send, string promptKey, CancellationToken cancellationToken)
+    {
+        var retriesEnabled = _options.Resilience.Enabled;
+        var maxRetries = retriesEnabled ? Math.Max(0, _options.Resilience.MaxRetries) : 0;
+        var baseDelayMs = Math.Max(1, _options.Resilience.BaseDelayMs);
+
+        for (var attempt = 0; ; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var response = await send(attempt);
+                if (attempt >= maxRetries || !ShouldRetry(response.StatusCode))
+                {
+                    return response;
+                }
+
+                response.Dispose();
+            }
+            catch (HttpRequestException ex) when (attempt < maxRetries)
+            {
+                _logger.LogWarning(PromptLoggingEvents.RetryAttempt, ex,
+                    "Transient HTTP error on attempt {Attempt} for PromptKey '{PromptKey}'. Retrying.", attempt + 1, promptKey);
             }
 
-            _logger.LogWarning("Received empty or null data from Langfuse prompts API");
-            return new List<LangfusePromptListItem>();
-        }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogError(ex, "HTTP error fetching all prompts from Langfuse");
-            throw;
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogError(ex, "Failed to deserialize prompts from Langfuse");
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error fetching all prompts from Langfuse");
-            throw;
+            var delay = TimeSpan.FromMilliseconds(baseDelayMs * Math.Pow(2, attempt));
+            _logger.LogInformation(PromptLoggingEvents.RetryAttempt,
+                "Retrying request for PromptKey '{PromptKey}' in {DelayMs}ms (attempt {Attempt}/{MaxRetries})",
+                promptKey, delay.TotalMilliseconds, attempt + 1, maxRetries);
+            await Task.Delay(delay, cancellationToken);
         }
     }
 
-    public async Task<CreateLangfusePromptResponse> CreatePromptAsync(
-        CreateLangfusePromptRequest request,
-        CancellationToken cancellationToken = default)
+    private static string BuildPromptRequestUri(string promptName, int? version, string? label)
     {
-        ThrowIfNotConfigured();
-
-        if (request is null)
+        var queryParams = new List<string>();
+        if (version.HasValue)
         {
-            throw new ArgumentNullException(nameof(request));
+            queryParams.Add($"version={version.Value}");
         }
 
-        if (string.IsNullOrWhiteSpace(request.Name))
+        if (!string.IsNullOrWhiteSpace(label))
         {
-            throw new ArgumentException("Prompt name is required.", nameof(request));
+            queryParams.Add($"label={Uri.EscapeDataString(label)}");
         }
 
-        if (string.IsNullOrWhiteSpace(request.Prompt))
-        {
-            throw new ArgumentException("Prompt content is required.", nameof(request));
-        }
-
-        if (string.IsNullOrWhiteSpace(request.Type))
-        {
-            throw new ArgumentException("Prompt type is required.", nameof(request));
-        }
-
-        try
-        {
-            _logger.LogInformation("Creating new prompt version for '{PromptName}' in Langfuse", request.Name);
-
-            var jsonContent = JsonSerializer.Serialize(request, JsonOptions);
-            using var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-
-            var response = await _httpClient.PostAsync("/api/public/v2/prompts", httpContent, cancellationToken);
-            response.EnsureSuccessStatusCode();
-
-            var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-            var createdPrompt = JsonSerializer.Deserialize<CreateLangfusePromptResponse>(responseContent, JsonOptions)
-                ?? throw new InvalidOperationException("Failed to deserialize created prompt response");
-
-            _logger.LogInformation("Successfully created prompt '{PromptName}' version {Version}",
-                createdPrompt.Name, createdPrompt.Version);
-
-            return createdPrompt;
-        }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogError(ex, "HTTP error creating prompt '{PromptName}' in Langfuse", request.Name);
-            throw;
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogError(ex, "Failed to serialize/deserialize prompt '{PromptName}'", request.Name);
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error creating prompt '{PromptName}' in Langfuse", request.Name);
-            throw;
-        }
+        var queryString = queryParams.Count > 0 ? "?" + string.Join("&", queryParams) : string.Empty;
+        return $"/api/public/v2/prompts/{Uri.EscapeDataString(promptName)}{queryString}";
     }
 
-    public async Task<CreateLangfuseChatPromptResponse> CreateChatPromptAsync(
-        CreateLangfuseChatPromptRequest request,
-        CancellationToken cancellationToken = default)
+    private static void ValidatePromptName(string promptName)
     {
-        ThrowIfNotConfigured();
-
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
-
-        if (string.IsNullOrWhiteSpace(request.Name))
-        {
-            throw new ArgumentException("Prompt name is required.", nameof(request));
-        }
-
-        if (request.Prompt is null || request.Prompt.Length == 0)
-        {
-            throw new ArgumentException("Chat messages are required.", nameof(request));
-        }
-
-        if (string.IsNullOrWhiteSpace(request.Type))
-        {
-            throw new ArgumentException("Prompt type is required.", nameof(request));
-        }
-
-        try
-        {
-            _logger.LogInformation("Creating new chat prompt version for '{PromptName}' in Langfuse", request.Name);
-
-            var jsonContent = JsonSerializer.Serialize(request, JsonOptions);
-            using var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-
-            var response = await _httpClient.PostAsync("/api/public/v2/prompts", httpContent, cancellationToken);
-            response.EnsureSuccessStatusCode();
-
-            var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-            var createdPrompt = JsonSerializer.Deserialize<CreateLangfuseChatPromptResponse>(responseContent, JsonOptions)
-                ?? throw new InvalidOperationException("Failed to deserialize created chat prompt response");
-
-            _logger.LogInformation("Successfully created chat prompt '{PromptName}' version {Version}",
-                createdPrompt.Name, createdPrompt.Version);
-
-            return createdPrompt;
-        }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogError(ex, "HTTP error creating chat prompt '{PromptName}' in Langfuse", request.Name);
-            throw;
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogError(ex, "Failed to serialize/deserialize chat prompt '{PromptName}'", request.Name);
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error creating chat prompt '{PromptName}' in Langfuse", request.Name);
-            throw;
-        }
-    }
-
-    public async Task<LangfusePromptModel> UpdatePromptLabelsAsync(
-        string promptName,
-        int version,
-        UpdatePromptLabelsRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        ThrowIfNotConfigured();
-
         if (string.IsNullOrWhiteSpace(promptName))
         {
             throw new ArgumentException("Prompt name is required.", nameof(promptName));
         }
-
-        if (version <= 0)
-        {
-            throw new ArgumentException("Version must be greater than 0.", nameof(version));
-        }
-
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
-
-        if (request.NewLabels is null || request.NewLabels.Length == 0)
-        {
-            throw new ArgumentException("At least one label is required.", nameof(request));
-        }
-
-        try
-        {
-            _logger.LogInformation("Updating labels for prompt '{PromptName}' version {Version} in Langfuse",
-                promptName, version);
-
-            var requestUri = $"/api/public/v2/prompts/{Uri.EscapeDataString(promptName)}/versions/{version}";
-
-            var jsonContent = JsonSerializer.Serialize(request, JsonOptions);
-            var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-
-            var httpRequest = new HttpRequestMessage(HttpMethod.Patch, requestUri)
-            {
-                Content = httpContent
-            };
-
-            var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
-
-            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-            {
-                _logger.LogWarning("Prompt '{PromptName}' version {Version} not found in Langfuse",
-                    promptName, version);
-                throw new InvalidOperationException($"Prompt '{promptName}' version {version} not found");
-            }
-
-            response.EnsureSuccessStatusCode();
-
-            var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-            var updatedPrompt = JsonSerializer.Deserialize<LangfusePromptModel>(responseContent, JsonOptions)
-                ?? throw new InvalidOperationException("Failed to deserialize updated prompt response");
-
-            _logger.LogInformation("Successfully updated labels for prompt '{PromptName}' version {Version}",
-                updatedPrompt.Name, updatedPrompt.Version);
-
-            return updatedPrompt;
-        }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogError(ex, "HTTP error updating prompt '{PromptName}' version {Version} in Langfuse",
-                promptName, version);
-            throw;
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogError(ex, "Failed to serialize/deserialize prompt '{PromptName}' version {Version}",
-                promptName, version);
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error updating prompt '{PromptName}' version {Version} in Langfuse",
-                promptName, version);
-            throw;
-        }
     }
+
+    private static bool ShouldRetry(HttpStatusCode statusCode)
+        => statusCode == HttpStatusCode.RequestTimeout
+           || statusCode == (HttpStatusCode)429
+           || (int)statusCode >= 500;
 }

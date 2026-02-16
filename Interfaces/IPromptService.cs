@@ -4,46 +4,38 @@ namespace PromptProvider.Interfaces;
 
 public interface IPromptService
 {
-    /// <summary>
-    /// Create a new prompt version in Langfuse
-    /// </summary>
     Task<PromptResponse> CreatePromptAsync(CreatePromptRequest request, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Create a new chat prompt version in Langfuse
-    /// </summary>
     Task<ChatPromptResponse> CreateChatPromptAsync(CreateChatPromptRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Get a prompt by key with optional version or label. Falls back to local defaults if Langfuse is unavailable.
+    /// Retrieves a text prompt.
+    /// Precedence rules:
+    /// 1) explicit method parameters (version/label)
+    /// 2) configured prompt entry defaults
+    /// 3) Langfuse default behavior.
+    /// If a version is effective, label is ignored.
+    /// Falls back to local configured defaults when remote retrieval fails.
     /// </summary>
-    /// <param name="promptKey">The prompt key/name</param>
-    /// <param name="version">Optional specific version number</param>
-    /// <param name="label">Optional label (e.g., "production", "latest")</param>
-    /// <param name="cancellationToken">Cancellation token</param>
     Task<PromptResponse?> GetPromptAsync(string promptKey, int? version = null, string? label = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Get a chat prompt by key with optional version or label. Falls back to local defaults if Langfuse is unavailable.
+    /// Retrieves a chat prompt.
+    /// Precedence rules:
+    /// 1) explicit method parameters (version/label)
+    /// 2) configured prompt entry defaults
+    /// 3) Langfuse default behavior.
+    /// If a version is effective, label is ignored.
+    /// Falls back to local configured defaults when remote retrieval fails.
     /// </summary>
-    /// <param name="promptKey">The prompt key/name</param>
-    /// <param name="version">Optional specific version number</param>
-    /// <param name="label">Optional label (e.g., "production", "latest")</param>
-    /// <param name="cancellationToken">Cancellation token</param>
     Task<ChatPromptResponse?> GetChatPromptAsync(string promptKey, int? version = null, string? label = null, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Get all prompts from Langfuse
-    /// </summary>
-    Task<List<LangfusePromptListItem>> GetAllPromptsAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<LangfusePromptListItem>> GetAllPromptsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Get multiple prompts by keys with optional label. Falls back to local defaults if Langfuse is unavailable.
+    /// Retrieves prompts by keys. Individual key failures do not fail the whole batch.
     /// </summary>
-    Task<List<PromptResponse>> GetPromptsAsync(IEnumerable<string> promptKeys, string? label = null, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<PromptResponse>> GetPromptsAsync(IEnumerable<string> promptKeys, string? label = null, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Update labels for a specific prompt version in Langfuse
-    /// </summary>
     Task<PromptResponse> UpdatePromptLabelsAsync(string promptKey, int version, UpdatePromptLabelsRequest request, CancellationToken cancellationToken = default);
 }
